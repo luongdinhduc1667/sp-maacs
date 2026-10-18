@@ -43,7 +43,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Bien dich kiem thu that bai.' }
         $testClassPath = $mainClassPath + [IO.Path]::PathSeparator + $testClassesPath
         if ($Test) {
-            & java -ea '-Dfile.encoding=UTF-8' '-Djava.awt.headless=true' -cp $testClassPath org.junit.runner.JUnitCore vn.healthshare.CoreRegressionTest vn.healthshare.LsssReconstructionTest vn.healthshare.UiLifecycleTest
+            & java -ea '-Dfile.encoding=UTF-8' '-Djava.awt.headless=true' -cp $testClassPath org.junit.runner.JUnitCore vn.healthshare.CoreRegressionTest vn.healthshare.LsssReconstructionTest vn.healthshare.UiLifecycleTest vn.healthshare.BenchmarkProgressTest vn.healthshare.UiBenchmarkProgressTest
             if ($LASTEXITCODE -ne 0) { throw 'Kiem thu that bai.' }
         }
         if ($RenderUi) {

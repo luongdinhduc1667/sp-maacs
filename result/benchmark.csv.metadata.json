@@ -1,0 +1,17 @@
+{
+  "backend": "JPBC_2.0.0_TYPE_A1_BLS01",
+  "primeBits": 517,
+  "primeCount": 3,
+  "signature": "JPBC BLS01 / SHA-256",
+  "warmupsPerPoint": 1,
+  "startedUtc": "2026-10-18T17:20:36.622985700Z",
+  "java": "21.0.12",
+  "os": "Windows 11 amd64",
+  "availableProcessors": 12,
+  "policyAttributes": [5,10,15,20,25],
+  "satisfyingAttributes": [3,5,7,10,12],
+  "encryptionScope": "ABE equations 5-8, excludes AES/HKDF and JSON",
+  "decryptionScope": "ABE equations 12-14 on a selected satisfying clause, equality checked after timer",
+  "keygenScope": "CAKeyGen and AAKeyGen for the satisfying set, reported separately and summed",
+  "baseline26": "Unavailable: primary full text needed; no comparison timings invented"
+}

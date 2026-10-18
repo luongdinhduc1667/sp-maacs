@@ -1,6 +1,24 @@
-# Kết quả kiểm tra phiên bản 2.0.1
+# Kiểm tra phiên bản 2.0.2
 
-Ngày kiểm tra: 18/10/2026. Môi trường: Windows 11 amd64, Oracle JDK 21.0.12, Maven 3.10.0. Thực thi JPBC 2.0.0 Type A1 bằng Java và chữ ký BLS01/SHA-256; không dùng backend số mũ.
+Ngày cập nhật: 19/10/2026. Môi trường: Windows 11 amd64, Oracle JDK 21.0.12, Maven 3.10.0. Thực thi JPBC 2.0.0 Type A1 bằng Java và chữ ký BLS01/SHA-256; không dùng backend số mũ.
+
+Bản 2.0.2 bổ sung tiến độ benchmark: mặc định 5 điểm × 10 lượt đo, cộng 5 warm-up, tổng 55 lượt. Giao diện hiển thị điểm `/5`, thuộc tính, lượt, bước CAKeyGen/AAKeyGen/Encrypt/Decrypt và số lượt đo/warm-up đã xong; bảng và biểu đồ cập nhật sau mỗi điểm. Tác vụ kết thúc với thông báo hoàn tất 5/5. Hủy giữ những điểm đã hoàn tất để xem; chỉ xuất bộ CSV đầy đủ khi đủ 5 điểm và không còn tác vụ chạy. Các callback tiến độ nằm ngoài vùng bấm giờ; không thay thuật toán hoặc dữ liệu thực nghiệm 517 bit đã lưu.
+
+Các kiểm tra xác nhận bản 2.0.2 đã đạt:
+
+| Kiểm tra 2.0.2 | Kết quả |
+|---|---|
+| Maven `verify -Ppaper-tests` | 11 bài JUnit đạt; 0 failures, 0 errors, 0 skipped; BUILD SUCCESS phiên bản 2.0.2 |
+| `BenchmarkProgressTest` | 2 bài đạt: benchmark hữu hạn, tiến độ tăng đúng thứ tự và dừng khi hủy, dùng tham số 64 bit |
+| `UiBenchmarkProgressTest` | 1 bài đạt: chạy mặc định 10 lượt × 5 điểm ở 64 bit, đủ 55 lượt; điểm đầu hiện khi worker còn chạy; điểm 2/5 được hiển thị; một lần hoàn tất với đủ 5 dòng và 50/50 lượt đo |
+| Các bài JUnit hiện có | 60 kiểm tra hành vi mật mã, 3 bài LSSS, 3 bài vòng đời UI và 1 bài cấu hình 517 bit đều đạt trong lần Maven trên |
+| `build.ps1 -RenderUi` | GUI smoke toàn bộ luồng thao tác và worker nền đạt |
+
+Kết quả xác nhận nằm trong `output/benchmark-progress-verification.log` và `output/maven-verification.log`. Các kiểm tra này không chạy lại 50 lượt 517 bit. Bộ 517 bit lưu trước đây bắt đầu lúc 12:59:07 UTC và ghi xong lúc 13:24:56 UTC ngày 18/10/2026, khoảng 25 phút 48 giây; con số này giải thích thời gian chờ và không phải cam kết thời lượng cho lần chạy sau.
+
+Ảnh `output/screenshots/10-benchmark-progress.png` ghi lại lần chạy thực tế 64 bit với 10 lượt/điểm: điểm đầu đã xuất hiện trong bảng khi worker còn chạy ở điểm 2/5. Ảnh `output/screenshots/11-benchmark-completed.png` ghi lại trạng thái hoàn tất 5/5 và 50/50 lượt đo. Hai ảnh này xác nhận giao diện tiến độ, không thay thế số liệu thực nghiệm 517 bit.
+
+Bảng sau ghi lại các kiểm tra đã đạt ở bản 2.0.1 ngày 18/10/2026, trước thay đổi tiến độ benchmark:
 
 | Kiểm tra | Kết quả |
 |---|---|
@@ -23,9 +41,9 @@ Ngày kiểm tra: 18/10/2026. Môi trường: Windows 11 amd64, Oracle JDK 21.0.
 | EHR hoặc header ciphertext bị sửa | AES-GCM từ chối xác thực |
 | Public BLS parameters | Không có n0/n1/n2, không xuất phân tích N |
 
-Bằng chứng:
+Bằng chứng của các kiểm tra trước:
 
-- `output/maven-verification.log`: kết quả Maven/JUnit và kiểm tra 517 bit.
+- `output/maven-verification.log`: log Maven/JUnit và kiểm tra 517 bit; được cập nhật khi kiểm tra bản mới.
 - `output/ui-lock-fix-verification.log`: 7 bài JUnit, GUI smoke/render và worker nền sau sửa vòng đời tác vụ.
 - `output/visible-ui-click-verification.log`: 3 tình huống bấm chuột trên cửa sổ thật bằng AWT Robot.
 - `output/screenshots/08-visible-startup.png`: cửa sổ mặc định 517 bit trước khi tạo phiên.

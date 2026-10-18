@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>vn.healthshare</groupId><artifactId>sp-maacs-simulator</artifactId><version>2.0.1</version>
+  <groupId>vn.healthshare</groupId><artifactId>sp-maacs-simulator</artifactId><version>2.0.2</version>
   <properties><maven.compiler.release>21</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding><paper.tests>false</paper.tests></properties>
   <repositories><repository><id>vendored-jpbc</id><url>file://${project.basedir}/lib/maven</url></repository></repositories>
   <dependencies>
@@ -17,7 +17,7 @@
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.4.2</version>
       <configuration><archive><manifest><mainClass>vn.healthshare.Main</mainClass></manifest><manifestEntries><Class-Path>../lib/jpbc-api-2.0.0.jar ../lib/jpbc-plaf-2.0.0.jar ../lib/jpbc-crypto-2.0.0.jar ../lib/bcprov-jdk16-1.46.jar</Class-Path></manifestEntries></archive></configuration>
     </plugin>
-    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version><configuration><includes><include>**/CoreRegressionTest.java</include><include>**/LsssReconstructionTest.java</include><include>**/UiLifecycleTest.java</include><include>**/PaperParametersTest.java</include></includes><systemPropertyVariables><java.awt.headless>true</java.awt.headless><paper.tests>${paper.tests}</paper.tests></systemPropertyVariables></configuration></plugin>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version><configuration><includes><include>**/CoreRegressionTest.java</include><include>**/LsssReconstructionTest.java</include><include>**/UiLifecycleTest.java</include><include>**/BenchmarkProgressTest.java</include><include>**/UiBenchmarkProgressTest.java</include><include>**/PaperParametersTest.java</include></includes><systemPropertyVariables><java.awt.headless>true</java.awt.headless><paper.tests>${paper.tests}</paper.tests></systemPropertyVariables></configuration></plugin>
   </plugins></build>
   <profiles><profile><id>paper-tests</id><properties><paper.tests>true</paper.tests></properties></profile></profiles>
 </project>

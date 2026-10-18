@@ -19,34 +19,60 @@ public final class Benchmark {
                          long encryptPairings,long decryptPairings,int jsonBytes,double caKeygenMs,double aaKeygenMs,int primeBits){}
     public record Sample(int attributes,int satisfyingAttributes,int iteration,int primeBits,double caKeygenMs,double aaKeygenMs,
                          double encryptionMs,double decryptionMs,long encryptPairings,long decryptPairings,boolean verified){}
+    /** A finite benchmark plan: five points, one warm-up and runsPerPoint measured samples at each point. */
+    public record Progress(int pointIndex,int pointCount,int attributes,int iteration,int runsPerPoint,boolean warmup,
+                           int completedMeasurements,int completedWarmups,String phase){
+        public int totalMeasurements(){return pointCount*runsPerPoint;}
+        public int totalWarmups(){return pointCount;}
+        public int completedSteps(){return completedMeasurements+completedWarmups;}
+        public int totalSteps(){return totalMeasurements()+totalWarmups();}
+        public String description(){
+            if(pointIndex==0)return phase+" · tổng "+completedMeasurements+"/"+totalMeasurements()+" lượt đo · "+completedWarmups+"/"+totalWarmups()+" lượt khởi động";
+            String current=warmup?"khởi động 1/1":"lượt "+iteration+"/"+runsPerPoint;
+            return "Điểm "+pointIndex+"/"+pointCount+" · "+attributes+" thuộc tính · "+current+" · tổng "+completedMeasurements+"/"+totalMeasurements()+" · "+phase;
+        }
+    }
     public record Report(List<Result> results,List<Sample> samples,int primeBits,int warmups,String startedUtc){
         public Report{results=List.copyOf(results);samples=List.copyOf(samples);}
     }
     public static List<Result> run(int runs,int bits,Consumer<String> progress){return runDetailed(runs,bits,progress,s->{}).results();}
     public static Report runDetailed(int runs,int bits,Consumer<String> progress,Consumer<Sample> onSample){
+        return runDetailed(runs,bits,progress,onSample,p->{},r->{});
+    }
+    public static Report runDetailed(int runs,int bits,Consumer<String> progress,Consumer<Sample> onSample,
+                                     Consumer<Progress> onProgress,Consumer<Result> onResult){
         if(runs<1||runs>100)throw new IllegalArgumentException("Số lượt phải từ 1 đến 100.");
         String started=java.time.Instant.now().toString();
+        int pointCount=5,warmups=1,completedMeasurements=0,completedWarmups=0;
+        progress.accept("Benchmark gồm "+pointCount+" điểm (5, 10, 15, 20, 25 thuộc tính) × "+runs+" lượt đo = "+(pointCount*runs)+" lượt đo, cộng "+pointCount+" lượt khởi động. Số lượt bắt đầu từ 1 ở mỗi điểm.");
         progress.accept("GlobalSetup JPBC Type A1: 3 × "+bits+" bit; có thể cần thời gian tạo đường cong lần đầu.");
+        emit(onProgress,new Progress(0,pointCount,0,0,runs,false,0,0,"GlobalSetup"));
         CompositeGroup group=new CompositeGroup(bits);
+        emit(onProgress,new Progress(0,pointCount,0,0,runs,false,0,0,"CASetup"));
         SpMaacs scheme=new SpMaacs(group);CentralAuthority ca=new CentralAuthority(group);
         Map<String,AttributeAuthority> authorities=new LinkedHashMap<>();Map<String,PublicAuthority> publics=new LinkedHashMap<>();List<Attribute> catalog=new ArrayList<>();
         for(int aa=0;aa<5;aa++){
             List<Attribute> attrs=new ArrayList<>();for(int i=0;i<5;i++)attrs.add(Attribute.of("AA"+(aa+1),"A"+(i+1),"Value"+(i+1)));
+            emit(onProgress,new Progress(0,pointCount,0,0,runs,false,0,0,"AASetup "+(aa+1)+"/5"));
             AttributeAuthority authority=new AttributeAuthority(group,"AA"+(aa+1),attrs,ca.verificationKey());authorities.put(authority.id(),authority);publics.put(authority.id(),authority.publicKey());catalog.addAll(attrs);
         }
-        List<Result> results=new ArrayList<>();List<Sample> samples=new ArrayList<>();int warmups=1;
+        List<Result> results=new ArrayList<>();List<Sample> samples=new ArrayList<>();
         int pointIndex=0;
         for(int count:new int[]{5,10,15,20,25}){
             int split=new int[]{3,5,7,10,12}[pointIndex++];List<Attribute> all=List.copyOf(catalog.subList(0,count)),satisfying=all.subList(0,split);
             Policy policy=Policy.parse("("+join(satisfying)+") OR ("+join(all.subList(split,count))+")");
-            progress.accept("Điểm "+count+" thuộc tính; cấp khóa và giải mã tập thỏa "+split+"; warm-up "+warmups+" lượt.");
+            progress.accept("Điểm "+pointIndex+"/"+pointCount+": "+count+" thuộc tính; cấp khóa và giải mã tập thỏa "+split+"; khởi động "+warmups+" lượt, đo "+runs+" lượt; tổng đã đo "+completedMeasurements+"/"+(pointCount*runs)+".");
             double[] caTimes=new double[runs],aaTimes=new double[runs],encTimes=new double[runs],decTimes=new double[runs];long ep=0,dp=0;int encodedBytes=0;
             for(int iteration=-warmups;iteration<runs;iteration++){
-                if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException("Đã hủy benchmark.");
+                boolean warmup=iteration<0;int displayIteration=warmup?0:iteration+1;
+                emit(onProgress,new Progress(pointIndex,pointCount,count,displayIteration,runs,warmup,completedMeasurements,completedWarmups,"CAKeyGen"));
                 long start=System.nanoTime();Identity identity=ca.register("bench-"+count+"-"+(iteration+warmups));double caMs=millis(start);
+                emit(onProgress,new Progress(pointIndex,pointCount,count,displayIteration,runs,warmup,completedMeasurements,completedWarmups,"AAKeyGen"));
                 start=System.nanoTime();UserKeys subset=issue(identity,satisfying,authorities);double aaMs=millis(start);
                 var k=group.targetGenerator().pow(group.p1Scalar());var before=group.counts();
+                emit(onProgress,new Progress(pointIndex,pointCount,count,displayIteration,runs,warmup,completedMeasurements,completedWarmups,"Encrypt"));
                 start=System.nanoTime();List<Clause> ct=scheme.encapsulate(k,policy,publics,x->{});double encMs=millis(start);ep=group.counts().minus(before).pairings();
+                emit(onProgress,new Progress(pointIndex,pointCount,count,displayIteration,runs,warmup,completedMeasurements,completedWarmups,"Decrypt"));
                 before=group.counts();start=System.nanoTime();
                 CompositeGroup.Element recovered;
                 try{recovered=scheme.recoverCandidate(ct.getFirst(),subset);}catch(AccessDenied e){throw new IllegalStateException(e);}
@@ -57,12 +83,20 @@ public final class Benchmark {
                 if(iteration>=0){
                     caTimes[iteration]=caMs;aaTimes[iteration]=aaMs;encTimes[iteration]=encMs;decTimes[iteration]=decMs;
                     Sample sample=new Sample(count,split,iteration+1,bits,caMs,aaMs,encMs,decMs,ep,dp,true);samples.add(sample);onSample.accept(sample);
-                    progress.accept(String.format(Locale.ROOT,"%d thuộc tính · lượt %d/%d: CA %.1f + AA %.1f ms; Encrypt %.1f ms; Decrypt %.1f ms; K đúng.",count,iteration+1,runs,caMs,aaMs,encMs,decMs));
-                }
+                    completedMeasurements++;
+                    progress.accept(String.format(Locale.ROOT,"Điểm %d/%d · %d thuộc tính · lượt %d/%d · tổng %d/%d: CA %.1f + AA %.1f ms; Encrypt %.1f ms; Decrypt %.1f ms; K đúng.",pointIndex,pointCount,count,iteration+1,runs,completedMeasurements,pointCount*runs,caMs,aaMs,encMs,decMs));
+                }else completedWarmups++;
+                emit(onProgress,new Progress(pointIndex,pointCount,count,displayIteration,runs,warmup,completedMeasurements,completedWarmups,"K đúng"));
             }
-            results.add(new Result(count,split,policy.clauses().size(),runs,mean(caTimes)+mean(aaTimes),mean(encTimes),mean(decTimes),sd(encTimes),sd(decTimes),ep,dp,encodedBytes,mean(caTimes),mean(aaTimes),bits));
+            Result result=new Result(count,split,policy.clauses().size(),runs,mean(caTimes)+mean(aaTimes),mean(encTimes),mean(decTimes),sd(encTimes),sd(decTimes),ep,dp,encodedBytes,mean(caTimes),mean(aaTimes),bits);
+            results.add(result);onResult.accept(result);CompositeGroup.checkCancelled();
         }
+        emit(onProgress,new Progress(pointCount,pointCount,25,runs,runs,false,completedMeasurements,completedWarmups,"Hoàn tất"));
+        progress.accept("Hoàn tất benchmark: "+pointCount+"/"+pointCount+" điểm, "+completedMeasurements+"/"+(pointCount*runs)+" lượt đo và "+completedWarmups+"/"+pointCount+" lượt khởi động; mọi khóa K đều đúng.");
         return new Report(results,samples,bits,warmups,started);
+    }
+    private static void emit(Consumer<Progress> callback,Progress value){
+        CompositeGroup.checkCancelled();callback.accept(value);CompositeGroup.checkCancelled();
     }
     private static UserKeys issue(Identity identity,List<Attribute> all,Map<String,AttributeAuthority> authorities){
         Map<String,List<Attribute>> byAa=new LinkedHashMap<>();for(Attribute a:all)byAa.computeIfAbsent(a.label().authority(),x->new ArrayList<>()).add(a);

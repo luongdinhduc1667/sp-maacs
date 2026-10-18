@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $projectPath = Split-Path -Parent $PSScriptRoot
-$outputPath = Join-Path $projectPath 'output/sp-maacs-jpbc-2.0.1.zip'
+$outputPath = Join-Path $projectPath 'output/sp-maacs-jpbc-2.0.2.zip'
 $files = @()
 foreach ($directory in @('src','docs','tools','lib')) {
     $files += Get-ChildItem -LiteralPath (Join-Path $projectPath $directory) -Recurse -File
@@ -11,7 +11,9 @@ $explicitFiles = @(
     'output/paper-figure3-517.csv.metadata.json','output/paper-figure3-517.csv.png',
     'output/maven-verification.log','output/ui-verification.log','output/paper-demo-run.txt',
     'output/ui-lock-fix-verification.log','output/visible-ui-click-verification.log',
+    'output/benchmark-progress-verification.log',
     'output/screenshots/08-visible-startup.png','output/screenshots/09-visible-cancelled.png',
+    'output/screenshots/10-benchmark-progress.png','output/screenshots/11-benchmark-completed.png',
     'output/paper-demo/cloud-EHR-001.json'
 )
 foreach ($item in $explicitFiles) { $files += Get-Item -LiteralPath (Join-Path $projectPath $item) }

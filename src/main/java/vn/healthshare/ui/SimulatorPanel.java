@@ -63,6 +63,11 @@ public final class SimulatorPanel extends JPanel {
     private final BenchmarkPlot plot=new BenchmarkPlot();
     private List<Benchmark.Result> benchmarkRows=List.of();
     private Benchmark.Report benchmarkReport;
+    private boolean benchmarkActive;
+    private final List<Benchmark.Result> liveBenchmarkRows=new ArrayList<>();
+    private final JProgressBar benchmarkProgress=new JProgressBar();
+    private final JLabel benchmarkDetail=label("Chưa chạy. Kết quả sẽ xuất hiện sau mỗi điểm đo hoàn tất.",13,false);
+    private final JTextArea benchmarkPlan=area("",2);
     private final JButton benchmarkButton=button("Chạy benchmark",null);
     private final JSpinner runs=new JSpinner(new SpinnerNumberModel(10,1,100,1));
 
@@ -207,18 +212,48 @@ public final class SimulatorPanel extends JPanel {
         JPanel toolbar=new JPanel(new FlowLayout(FlowLayout.LEFT,10,8));toolbar.setOpaque(false);toolbar.add(new JLabel("Lượt đo / điểm"));toolbar.add(runs);toolbar.add(benchmarkButton);
         toolbar.add(button("Nạp CSV đã đo",()->{JFileChooser picker=new JFileChooser();if(picker.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)safe(()->loadBenchmarkCsv(picker.getSelectedFile().toPath()));}));
         toolbar.add(button("Xuất CSV + PNG",()->safe(()->{
-            if(benchmarkRows.isEmpty())throw new IllegalArgumentException("Hãy chạy benchmark trước.");var target=chooseSave("benchmark.csv",Benchmark.csv(benchmarkRows));if(target==null)return;
+            if(benchmarkActive)throw new IllegalArgumentException("Benchmark đang chạy; hãy chờ đủ 5 điểm đo trước khi xuất bộ kết quả.");
+            if(benchmarkRows.size()!=5)throw new IllegalArgumentException("Cần đủ 5 điểm đo. Có thể chạy benchmark hoặc nạp CSV đã đo.");var target=chooseSave("benchmark.csv",Benchmark.csv(benchmarkRows));if(target==null)return;
             try{ExperimentCharts.writePng(benchmarkRows,java.nio.file.Path.of(target+".png"));if(benchmarkReport!=null){Files.writeString(java.nio.file.Path.of(target+".raw.csv"),Benchmark.rawCsv(benchmarkReport),StandardCharsets.UTF_8);Files.writeString(java.nio.file.Path.of(target+".metadata.json"),Benchmark.metadata(benchmarkReport),StandardCharsets.UTF_8);}}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}
         })));benchmarkButton.addActionListener(e->runBenchmark());out.add(toolbar);
+        benchmarkPlan.setName("benchmarkPlan");benchmarkPlan.setEditable(false);benchmarkPlan.setFocusable(false);benchmarkPlan.setBackground(new Color(228,239,241));fixedHeight(benchmarkPlan,62);
+        ((javax.swing.text.DefaultCaret)benchmarkPlan.getCaret()).setUpdatePolicy(javax.swing.text.DefaultCaret.NEVER_UPDATE);
+        benchmarkDetail.setName("benchmarkDetail");fixedHeight(benchmarkDetail,24);benchmarkProgress.setName("benchmarkProgress");benchmarkProgress.setStringPainted(true);fixedHeight(benchmarkProgress,25);
+        runs.addChangeListener(e->updateBenchmarkPlan());updateBenchmarkPlan();
+        out.add(benchmarkPlan);out.add(Box.createVerticalStrut(8));out.add(benchmarkDetail);out.add(Box.createVerticalStrut(6));out.add(benchmarkProgress);out.add(Box.createVerticalStrut(12));
         plot.setPreferredSize(new Dimension(1000,300));plot.setMinimumSize(new Dimension(0,200));plot.setMaximumSize(new Dimension(Integer.MAX_VALUE,340));out.add(plot);out.add(Box.createVerticalStrut(14));
         JScrollPane table=scroll(table(benchModel));fixedHeight(table,200);out.add(table);out.add(Box.createVerticalStrut(14));
         JTextArea note=area("Pairing và lũy thừa JPBC chạy thật. Encrypt/Decrypt chỉ đo ABE, loại AES/HKDF/JSON. Cấp khóa = CAKeyGen + AAKeyGen, có lưu riêng từng phần. Mỗi điểm warm-up 1 lượt, sau đó đo trung bình và SD; mọi lượt xác nhận khôi phục đúng K.\n\nĐối chứng [26] Ma–Ge–Zhang cần PDF toàn văn để triển khai; chưa có đường số liệu đối chứng. Dùng hai nhánh DNF có tổng n dòng; các kích thước tập thỏa lấy trực tiếp từ trục Figure 3.",4);note.setEditable(false);note.setBackground(new Color(228,239,241));note.setBorder(new EmptyBorder(14,16,14,16));fixedHeight(note,120);out.add(note);return out;
     }
+    private void updateBenchmarkPlan(){
+        int measured=(Integer)runs.getValue(),total=5*measured;
+        benchmarkPlan.setText("5 điểm: 5 → 10 → 15 → 20 → 25 thuộc tính × "+measured+" lượt/điểm = "+total+" lượt đo + 5 warm-up. Bộ đếm từng điểm bắt đầu lại từ 1.\n"+
+                (primeBits==CompositeGroup.PAPER_PRIME_BITS?"Tham khảo: bộ 10 lượt/điểm ở 517 bit đã đo trên máy này mất khoảng 26 phút. Thời gian tùy máy.":"Cấu hình "+primeBits+" bit phục vụ kiểm tra nhanh; số liệu được ghi đúng tham số sử dụng."));
+        if(!benchmarkActive){benchmarkProgress.setMaximum(total+5);benchmarkProgress.setValue(0);benchmarkProgress.setString("0/"+total+" lượt đo · 0/5 warm-up");}
+    }
     private void runBenchmark() {
+        if(busy)return;
         int measured=(Integer)runs.getValue();
-        work("Benchmark JPBC "+measured+" lượt/điểm",()->Benchmark.runDetailed(measured,primeBits,this::appendLog,s->{}),report->{
-            benchmarkReport=report;benchmarkRows=report.results();showBenchmarkRows();status.setText("Benchmark hoàn tất; có thể xuất CSV, từng lượt và metadata.");
+        updateBenchmarkPlan();benchmarkActive=true;liveBenchmarkRows.clear();benchmarkReport=null;benchmarkRows=List.of();showBenchmarkRows();
+        benchmarkDetail.setText("Đang khởi tạo · 0/5 điểm · 0/"+(5*measured)+" lượt đo.");
+        work("Benchmark JPBC · 5 điểm × "+measured+" lượt",()->Benchmark.runDetailed(measured,primeBits,this::appendLog,s->{},this::benchmarkProgressChanged,this::benchmarkPointCompleted),report->{
+            benchmarkReport=report;benchmarkRows=report.results();showBenchmarkRows();
+            benchmarkDetail.setText("Hoàn tất 5/5 điểm · "+report.samples().size()+"/"+(5*measured)+" lượt đo · 5/5 warm-up. Có thể xuất kết quả.");
+            status.setText("Benchmark hoàn tất; có thể xuất CSV, từng lượt và metadata.");
         },this::showError,false,true);
+    }
+    private void benchmarkProgressChanged(Benchmark.Progress progress){
+        if(!SwingUtilities.isEventDispatchThread()){SwingUtilities.invokeLater(()->benchmarkProgressChanged(progress));return;}
+        if(!benchmarkActive)return;
+        benchmarkProgress.setMaximum(progress.totalSteps());benchmarkProgress.setValue(progress.completedSteps());
+        String summary=progress.completedMeasurements()+"/"+progress.totalMeasurements()+" lượt đo · "+progress.completedWarmups()+"/"+progress.totalWarmups()+" warm-up";
+        benchmarkProgress.setString(summary);jobProgress.setIndeterminate(false);jobProgress.setMaximum(progress.totalSteps());jobProgress.setValue(progress.completedSteps());
+        if(!cancelRequested){benchmarkDetail.setText(progress.description());jobLabel=progress.description();updateActivity();}
+    }
+    private void benchmarkPointCompleted(Benchmark.Result result){
+        if(!SwingUtilities.isEventDispatchThread()){SwingUtilities.invokeLater(()->benchmarkPointCompleted(result));return;}
+        if(!benchmarkActive)return;
+        liveBenchmarkRows.add(result);benchmarkRows=List.copyOf(liveBenchmarkRows);showBenchmarkRows();
     }
     public void loadBenchmarkCsv(java.nio.file.Path path){
         try{benchmarkRows=Benchmark.readCsv(path);benchmarkReport=null;showBenchmarkRows();status.setText("Đã nạp kết quả JPBC 3 × "+benchmarkRows.getFirst().primeBits()+" bit từ "+path.getFileName()+"; không chạy lại phép đo.");}
@@ -253,7 +288,7 @@ public final class SimulatorPanel extends JPanel {
         counts.setText(sim.authorities().size()+" AA   /   "+sim.users().size()+" người dùng   /   "+sim.cloud().size()+" hồ sơ");showCloud();
     }
     private void showCloud() {if(sim==null)return;Ciphertext ct=sim.cloud().get(cloudPicker.getSelectedItem());cloudText.setText(ct==null?"Chưa có ciphertext trong phiên.":ct.publicJson());cloudText.setCaretPosition(0);}
-    private void appendLog(String message) {if(!SwingUtilities.isEventDispatchThread()){SwingUtilities.invokeLater(()->appendLog(message));return;}log.append(new SimpleDateFormat("HH:mm:ss").format(new Date())+"  "+message+"\n");log.setCaretPosition(log.getDocument().getLength());if(busy&&!cancelRequested){jobLabel=message;updateActivity();}}
+    private void appendLog(String message) {if(!SwingUtilities.isEventDispatchThread()){SwingUtilities.invokeLater(()->appendLog(message));return;}log.append(new SimpleDateFormat("HH:mm:ss").format(new Date())+"  "+message+"\n");log.setCaretPosition(log.getDocument().getLength());if(busy&&!cancelRequested&&!benchmarkActive){jobLabel=message;updateActivity();}}
     private void setBusy(boolean value){busy=value;jobProgress.setVisible(value);jobProgress.setIndeterminate(value);if(value){jobStarted=System.nanoTime();jobTimer.start();}else{jobTimer.stop();}updateAvailability();updateActivity();}
     private void updateAvailability(){
         for(JButton b:setupButtons)b.setEnabled(!busy);
@@ -262,7 +297,7 @@ public final class SimulatorPanel extends JPanel {
         benchmarkButton.setEnabled(!busy);runs.setEnabled(!busy);cancelButton.setEnabled(busy&&!cancelRequested);
     }
     private void updateActivity(){if(busy){long seconds=(System.nanoTime()-jobStarted)/1_000_000_000L;activity.setText((cancelRequested?"Đang hủy; chờ phép tính hiện tại kết thúc":jobLabel)+" · "+seconds+" giây");activity.setToolTipText(activity.getText());}}
-    private void cancelActiveTask(){if(!busy||cancelRequested)return;cancelRequested=true;Thread thread=jobThread;if(thread!=null)thread.interrupt();updateAvailability();updateActivity();}
+    private void cancelActiveTask(){if(!busy||cancelRequested)return;cancelRequested=true;Thread thread=jobThread;if(thread!=null)thread.interrupt();if(benchmarkActive)benchmarkDetail.setText("Đang hủy benchmark; chờ phép tính hiện tại kết thúc.");updateAvailability();updateActivity();}
     public boolean isTaskRunning(){return busy;}
     public boolean hasCryptoSession(){return sim!=null;}
     private JButton sessionButton(String text,Runnable action){JButton b=button(text,action);sessionButtons.add(b);return b;}
@@ -275,7 +310,7 @@ public final class SimulatorPanel extends JPanel {
     private <T> void work(String label,Callable<T> computation,Consumer<T> success,Consumer<Exception> failure,boolean discardOnCancel,boolean forceAsync){
         if(busy)return;status.setText(label+"…");
         if(synchronousTests&&!forceAsync){try{T result=computation.call();status.setText("Hoàn tất: "+label+".");success.accept(result);}catch(Exception e){failure.accept(e);}return;}
-        cancelRequested=false;discardSessionOnCancel=discardOnCancel;jobLabel=label;
+        cancelRequested=false;discardSessionOnCancel=discardOnCancel;jobLabel=label;boolean benchmarkTask=benchmarkActive;
         setBusy(true);new SwingWorker<T,Void>(){
             @Override protected T doInBackground()throws Exception{jobThread=Thread.currentThread();try{if(cancelRequested)throw new CancellationException();return computation.call();}finally{jobThread=null;Thread.interrupted();}}
             @Override protected void done(){
@@ -284,10 +319,11 @@ public final class SimulatorPanel extends JPanel {
                 }catch(Exception e){
                     Throwable cause=e instanceof java.util.concurrent.ExecutionException?e.getCause():e;
                     if(cancelRequested||cause instanceof CancellationException){
+                        if(benchmarkTask)benchmarkDetail.setText("Đã hủy · hoàn tất "+liveBenchmarkRows.size()+"/5 điểm. Kết quả các điểm đã đo vẫn hiển thị.");
                         if(discardSessionOnCancel){sim=null;userModel.setRowCount(0);catalogModel.clear();for(JComboBox<String> c:List.of(userPicker,recordPicker,grantUser,colluderOne,colluderTwo,cloudPicker))c.removeAllItems();counts.setText("Chưa có phiên mật mã");clearDecryption();cloudText.setText("");}
                         String message="Đã hủy tác vụ."+(discardSessionOnCancel?" Phiên đang sửa đã được bỏ; hãy khởi tạo lại.":" Có thể bắt đầu tác vụ mới.");activity.setText(message);status.setText(message);
-                    }else{failure.accept(cause instanceof Exception ex?ex:new IllegalStateException(cause));activity.setText("Tác vụ thất bại; bạn có thể thử lại.");}
-                }finally{cancelRequested=false;setBusy(false);}
+                    }else{if(benchmarkTask)benchmarkDetail.setText("Benchmark thất bại · hoàn tất "+liveBenchmarkRows.size()+"/5 điểm. Xem nhật ký để biết lỗi.");failure.accept(cause instanceof Exception ex?ex:new IllegalStateException(cause));activity.setText("Tác vụ thất bại; bạn có thể thử lại.");}
+                }finally{if(benchmarkTask)benchmarkActive=false;cancelRequested=false;setBusy(false);}
             }
         }.execute();
     }
