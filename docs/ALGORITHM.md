@@ -1,121 +1,97 @@
-# Ánh xạ thuật toán SP-MAACS sang chương trình
+# Ánh xạ SP-MAACS sang triển khai JPBC
 
-Nguồn: `3. Privacy preserving for healthcare data sharing.pdf`, Gupta và cộng sự, *Sensors* 2023, 23, 2617, DOI 10.3390/s23052617. Dùng Mục 3–5, đặc biệt trang 11–12; quy mô thực nghiệm tham khảo Mục 6.3, trang 15–17.
+Nguồn chính: `3. Privacy preserving for healthcare data sharing.pdf`, Gupta và cộng sự, *Sensors* 2023, 23, 2617, DOI [10.3390/s23052617](https://doi.org/10.3390/s23052617). Triển khai theo Mục 5, (1)–(14); cấu hình thực nghiệm theo Mục 6.3 và các trục Figure 3.
 
-## 1. Nhóm song tuyến tính bậc hợp số
+## 1. GlobalSetup và nhóm bậc hợp số
 
-Bài sử dụng N=p1·p2·p3, nhóm G và GT, g thuộc Gp1 và các phần tử ngẫu nhiên thuộc Gp3 để làm mù khóa. Backend `CompositeGroup` biểu diễn mỗi phần tử bằng bộ ba số mũ modulo p1, p2, p3:
+`CompositeGroup` dùng **JPBC 2.0.0 Type A1** trên đường cong elliptic, N=p1·p2·p3. Cấu hình bài báo dùng `TypeA1CurveGenerator(3, 517)`; constructor kiểm tra ba số nguyên tố phân biệt, mỗi số 517 bit và tích N.
 
-```text
-u = (u1,u2,u3), v = (v1,v2,v3)
-u * v  = (u1+v1,u2+v2,u3+v3)
-u / v  = (u1-v1,u2-v2,u3-v3)
-u ^ z  = (z*u1,z*u2,z*u3)
-e(u,v) = (u1*v1,u2*v2,u3*v3) thuộc GT
-```
+`ElementUtils.getGenerator` tạo generator các nhóm con. g thuộc Gp1, thành phần làm mù khóa thuộc Gp3. Pairing thật có tính song tuyến tính và trực giao giữa các nhóm con khác nhau. Đối tượng `Element` chứa phần tử bất biến của JPBC; `bytes()` là mã hóa đường cong/trường mở rộng, không phải tọa độ số mũ của bản trước.
 
-Mỗi tọa độ được giảm theo số nguyên tố tương ứng. Nhờ đó e(g^a,g^b)=e(g,g)^(ab); pairing giữa Gp1 và Gp3 là đơn vị. Sự khử các thành phần R thuộc Gp3 xảy ra khi tính pairing với ciphertext thuộc Gp1.
+Cache `build/private/type-a1-3x<bits>.properties` chứa `n0/n1/n2`, tức phân tích N. Cache không được xuất lên cloud hoặc đưa vào gói phân phối. `publicPairingParameters()` chỉ sao chép `type/p/n/l` cho BLS; JSON cloud không xuất các thừa số.
 
-Đây là mô hình trực tiếp của đại số, **không phải pairing trên đường cong elliptic**. Tọa độ số mũ và tham số nội bộ được biết, nên giả thiết khó về discrete logarithm và ẩn nhóm con không tồn tại. Việc JSON không chứa chuỗi giá trị thuộc tính không đem lại bảo đảm riêng tư mật mã với backend này.
+## 2. Setup CA/AA và cấp khóa
 
-## 2. Setup và cấp khóa
-
-| Thủ tục / công thức | Mã thực thi | Hành vi |
+| Thuật toán | Mã thực thi | Hành vi |
 |---|---|---|
-| GlobalSetup, §5.1 | `CompositeGroup(int)` | Tạo 3 số nguyên tố phân biệt, N, G, GT; phép pairing trực giao |
-| CASetup, §5.1 | `SpMaacs.CentralAuthority` | Tạo cặp chữ ký Ed25519; phân phối khóa xác minh |
-| AASetup, (1)–(4) | `SpMaacs.AttributeAuthority` | Chọn αk, βk, t cho từng cặp tên/giá trị; công bố e(g,g)^αk, g^βk, g^t |
-| CAKeyGen, §5.3 | `CentralAuthority.register` | K1=g^r_gid·R_gid; ký gid và K1; GID duy nhất |
-| AAKeyGen, (9)–(11) | `AttributeAuthority.issue` | Xác minh chứng nhận CA; tính K2,k=g^αk·K1^βk·R và K3,k,a=K1^t·R |
+| GlobalSetup, §5.1 | `CompositeGroup` | Tạo G, GT, N và các nhóm con bằng Type A1 |
+| CASetup, §5.1 | `CentralAuthority`, `BlsSignature` | Sinh cặp khóa BLS01; digest SHA-256 |
+| AASetup, (1)–(4) | `AttributeAuthority` | Chọn αk, βk, t cho từng cặp tên/giá trị; công bố e(g,g)^αk, g^βk, g^t |
+| CAKeyGen, §5.3 | `CentralAuthority.register` | K1=g^r_gid·R_gid; ký mã hóa chuẩn tắc của GID và K1 |
+| AAKeyGen, (9)–(11) | `AttributeAuthority.issue` | Xác minh BLS; K2,k=g^αk·K1^βk·R, K3,k,a=K1^t·R |
 
-Danh mục thuộc tính được AA công bố khi setup. Người vận hành mô phỏng đóng vai AA để phê duyệt thuộc tính cho GID; chứng nhận CA không thay thế kiểm tra nghề nghiệp ngoài đời. Lệnh cấp khóa chỉ chấp nhận thuộc tính đã công bố, đúng namespace AA.
+`BlsSignature` gọi **BLS01 của JPBC** với Bouncy Castle `SHA256Digest`, không tự dựng ánh xạ digest thành số mũ. Dùng backend Java JPBC, không bật PBC native. Họ chữ ký phù hợp mô tả bài; digest và encoding chứng nhận là lựa chọn cụ thể của chương trình do chưa có mã nguồn cấu hình gốc.
 
-Ed25519 là lựa chọn cụ thể cho giao diện chữ ký `Sign/Verify` tổng quát ở Mục 5.1. Thực nghiệm bài báo dùng BLS; thời gian và cấu trúc chữ ký do đó khác.
+Mỗi AA có bí mật riêng, chỉ cấp thuộc tính thuộc danh mục của mình sau khi xác minh CA. Người vận hành đóng vai AA phê duyệt; chứng nhận không thay việc kiểm tra nghề nghiệp ngoài đời.
 
-## 3. Chính sách DNF và LSSS
+## 3. DNF và LSSS
 
-`Policy.parse` phân tích công thức đơn điệu và đổi thành OR của các phép AND. Ví dụ:
+`Policy.parse` đổi AND/OR đơn điệu thành OR của các nhánh AND. Mỗi literal gồm AA, tên, giá trị; ciphertext `Row` chỉ giữ nhãn `AA.Name`. Tên AA, số nhánh/dòng và W vẫn công khai: cơ chế ẩn giá trị không ẩn toàn bộ chính sách.
 
-```text
-A.X=1 AND (B.Y=2 OR C.Z=3)
-  => (A.X=1 AND B.Y=2) OR (A.X=1 AND C.Z=3)
-```
-
-Mỗi literal có AA, tên thuộc tính và giá trị. Ciphertext chỉ lưu AA và tên; đối tượng `Row` không có trường giá trị. Chương trình không gắn bản chính sách đầy đủ vào đối tượng cloud. Bộ biên dịch chặn số nhánh/dòng để tránh nổ kích thước khi phân phối AND qua OR.
-
-Với nhánh AND l dòng, `Policy.andMatrix(l)` dựng W vuông dạng nối tiếp. Ví dụ l=3:
+Một nhánh AND ba dòng được dựng:
 
 ```text
-W = [1  1  0]
-    [0 -1  1]
-    [0  0 -1]
-
-v = (s,v2,v3)^T
-λ = (s+v2, -v2+v3, -v3)^T
-λ1+λ2+λ3=s
+W = [1  1  0]       v = (s,v2,v3)^T
+    [0 -1  1]       λ = (s+v2,-v2+v3,-v3)^T
+    [0  0 -1]       λ1+λ2+λ3=s
 ```
 
-Hệ số μx=1 cho mọi dòng. Tổng các dòng W=(1,0,...,0), nên toàn bộ literal của nhánh AND là cần thiết. Ma trận được tính thực sự trong Encrypt; Decrypt dùng tính chất tái tạo cố định này. Chương trình không nhận ma trận LSSS tùy ý để giải tổng quát.
+`Lsss.reconstruct` giải W_I^T·μ=(1,0,...,0) trên Z_N bằng khử Gauss, chọn pivot khả nghịch rồi xác minh nghiệm. Với ma trận AND được sinh, μx đều bằng 1, nhưng Decrypt tính và dùng vector μ. Solver có thể từ chối hệ cần xử lý pivot không khả nghịch; chưa phải bộ giải đầy đủ cho mọi ma trận trên Z_N. Giao diện vẫn nhận DNF, chưa có ngưỡng k-of-n hay nhập W tùy ý.
 
-Namespace `AA.Name` phân biệt thuộc tính trùng tên do các AA khác nhau phát hành. Người dùng có thể sở hữu nhiều giá trị của cùng một tên.
+Giới hạn biên dịch: 32 nhánh, 64 dòng/nhánh, 256 dòng tổng, 64 mức ngoặc, 16000 ký tự; loại nhánh trùng hoặc bị hấp thụ.
 
 ## 4. Encrypt, công thức (5)–(8)
 
-`SpMaacs.encrypt` chỉ nhận bản đồ **khóa công khai** của các AA. Chọn một K ngẫu nhiên trong GT,p1 cho toàn bộ EHR. Với mỗi nhánh, chọn s, vector v và rx độc lập; SAA là tập AA phân biệt xuất hiện **trong nhánh đó**:
+`encapsulate` nhận K thuộc GT,p1, chính sách và khóa **công khai** các AA. Mỗi nhánh chọn s, v, rx mới; SAA chỉ gồm các AA phân biệt trong nhánh:
 
 ```text
 λx   = Wx · v mod N
-C    = K * (product_k e(g,g)^αk)^s                 (5)
+C    = K · (product_k e(g,g)^αk)^s                 (5)
 C0   = g^s                                       (6)
-C1,x = (product_k g^βk)^λx * T_(name,value)^(-rx)  (7)
+C1,x = (product_k g^βk)^λx · T_(name,value)^(-rx)  (7)
 C2,x = g^rx                                      (8)
 ```
 
-Mỗi AA chỉ được nhân một lần trong các tích αk/βk dù có nhiều dòng của AA đó. Không tạo t mới theo từng lần mã hóa: t và T thuộc setup AA; Encrypt dùng T công khai của đúng giá trị do chủ hồ sơ chọn.
+Mỗi AA chỉ xuất hiện một lần trong các tích αk/βk dù quản lý nhiều dòng. T=g^t lấy từ danh mục công khai của đúng giá trị đã chọn; không sinh t mới lúc mã hóa. Mọi nhánh bọc cùng K.
 
-K là phần tử nhóm GT, không phải chuỗi 32 byte được ép trực tiếp vào nhóm. HKDF-SHA256 với salt ngẫu nhiên 32 byte dẫn xuất khóa AES 256 bit từ biểu diễn K. AES-GCM dùng IV ngẫu nhiên 12 byte và tag 128 bit. Mọi lần mã hóa có K, salt và IV mới.
-
-AAD là mã hóa nhị phân chuẩn tắc của phiên bản, backend, mã EHR, N, salt, IV, mọi nhánh, AA, tên thuộc tính, W, C, C0, C1 và C2. Vì vậy thay đổi một nhánh không dùng đến cũng làm xác thực thất bại. Đó là phần bổ sung của chương trình cho bước mã hóa đối xứng trong bài.
+`encrypt` bọc ABE bằng lớp mã hóa EHR: chọn K, dẫn xuất khóa AES-256 qua HKDF-SHA256 với salt 32 byte, rồi AES-GCM với IV 12 byte/tag 128 bit. AAD xác thực toàn bộ header, gồm backend, EHR ID, N, salt/IV và mọi nhánh, tên, W, C. Đây là lựa chọn bổ sung cho bước mã hóa đối xứng trong bài, không tính vào benchmark ABE.
 
 ## 5. Decrypt, công thức (12)–(14)
 
-`SpMaacs.decrypt` xét nhánh ít dòng trước. Không đọc chính sách bí mật hay so sánh giá trị plaintext:
+Với một nhánh và bộ khóa ứng viên:
 
-1. Nếu thiếu khóa AA hoặc tên thuộc tính, bỏ qua nhánh.
-2. Tính CK=∏k K2,k và numerator=e(CK,C0), công thức (12).
-3. Với mỗi dòng, thu thập các khóa K3 có cùng **AA và tên**, tính e(C1,x,K1)·e(C2,x,K3,x). Nếu người dùng có nhiều giá trị, thử tổ hợp các khóa đó.
-4. Nhân các kết quả với μx=1 để có denominator, công thức (13).
-5. Tính mask=numerator/denominator rồi K'=C/mask, công thức (14).
-6. Dẫn xuất khóa từ K', xác thực và giải mã AES-GCM. Tag đúng mới trả EHR; tag sai thì thử tổ hợp hoặc nhánh tiếp theo.
+```text
+CK          = product_k K2,k
+numerator   = e(CK,C0)                                      (12)
+denominator = product_x [e(C1,x,K1) · e(C2,x,K3,x)]^μx        (13)
+K'          = C / (numerator / denominator)                  (14)
+```
 
-Giới hạn 4096 tổ hợp trên toàn bộ yêu cầu giải mã; nếu vượt, yêu cầu báo rõ cần giảm số giá trị/thuộc tính. Lỗi tag không trả plaintext một phần.
+`recoverCandidate` dùng một khóa K3 cho mỗi tên trong nhánh đã chọn, giải μ rồi khôi phục K'; không so sánh giá trị thuộc tính plaintext. Benchmark so sánh K'=K sau khi dừng đồng hồ.
 
-Khi mọi khóa đúng giá trị và cùng r_gid, denominator=e(g,g)^(r_gid·s·Σβk). Phần này khử trong numerator, để lại e(g,g)^(s·Σαk). Khi khóa sai giá trị hoặc khác r_gid, các hạng thường không khử; K' sai và GCM từ chối. Cơ chế tag là cách nhận biết tổ hợp hợp lệ được bổ sung cho việc khớp giá trị ẩn.
+Luồng EHR `decrypt` thử nhánh ít dòng trước, bỏ nhánh thiếu AA/tên, thử các khóa cùng tên khi có nhiều giá trị, dùng HKDF/GCM xác nhận K'. Tối đa 4096 tổ hợp; tag sai không trả plaintext một phần. Thao tác GUI vì vậy có phạm vi khác ABE Decrypt của benchmark.
 
-## 6. Thử thông đồng
+Với khóa đúng giá trị và cùng r_gid, denominator=e(g,g)^(r_gid·s·Σβk); khử trong numerator để lại e(g,g)^(s·Σαk). Khóa sai hoặc khác GID thường không khử, K' sai và GCM từ chối.
 
-Luồng cấp khóa bình thường ràng buộc mỗi bộ khóa với GID. Riêng `Simulation.unsafePoolForExperiment` cố ý ghép dữ liệu khóa từ hai GID, bỏ qua kiểm tra GID ở tầng ứng dụng. Hàm Decrypt cũng không dùng phép so sánh GID để bác bỏ bộ ghép; việc từ chối đến từ phương trình không khử và xác thực GCM.
+## 6. Ghép khóa và giới hạn bảo mật
 
-Tình huống mẫu:
+`Simulation.unsafePoolForExperiment` cố ý ghép khóa hai GID, bỏ kiểm tra GID ở tầng quản lý. Decrypt không dùng so sánh GID làm lối tắt từ chối; kết quả đến từ khôi phục K/GCM.
 
-- colluder-a: HOSPITAL.Profession=Doctor, HOSPITAL.Affiliation=AIIMS.
-- colluder-b: MEDICAL.Specialization=Cardiology.
-- Từng người không đủ nhánh bác sĩ. Ghép các khóa và thử K1 của từng người đều bị từ chối trong thử nghiệm.
+Mẫu `colluder-a` có Doctor/AIIMS, `colluder-b` có Cardiology; mỗi người thiếu một phần nhánh bác sĩ. Thí nghiệm thử cả hai K1 khi ghép. Các phép thử hành vi không thay thế chứng minh an toàn thích nghi hoặc bao quát mọi đối thủ/kênh rò rỉ. JPBC/Bouncy Castle cũ được giữ cho nghiên cứu, xem [THIRD_PARTY.md](THIRD_PARTY.md).
 
-Kiểm thử còn bao gồm ghép hai K3 khác GID trong cùng một AA. Nếu một người đã đủ quyền độc lập, giao diện ghi rõ tình huống đó không kiểm chứng thông đồng.
+## 7. Phạm vi thực nghiệm
 
-Các phép thử này kiểm tra công thức được cài đặt, không chứng minh an toàn trước đối thủ biết số mũ; đối thủ đó có thể phá backend mô phỏng.
+Có 5 AA × 5 thuộc tính. Các điểm **5/10/15/20/25 thuộc tính chính sách** tương ứng **3/5/7/10/12 thuộc tính cấp khóa/giải mã**, lấy từ trục Figure 3. Danh mục sắp cố định theo AA; chọn hai nhánh AND độc lập, tổng n dòng, nhánh đầu là tập thỏa. Cấu trúc này là lựa chọn công khai của triển khai vì chưa có chính sách/mã nguồn thực nghiệm gốc.
 
-## 7. Hiệu năng và giới hạn
+Mỗi điểm có 1 warm-up, mặc định 10 lượt đo, GID/khóa mới mỗi lượt:
 
-Quy mô 5 AA × 5 tên và 10 lượt đo lấy theo §6.3. Phiên benchmark dùng 2 nhánh DNF rời nhau, tổng n=5,10,15,20,25 dòng. Người dùng được cấp ceil(n/2) thuộc tính của nhánh đầu. Cả 5 AA được tạo cho mỗi điểm; chỉ các AA của nhánh tham gia vào tích khóa của nhánh đó.
+- **CAKeyGen:** tính K1 và ký BLS.
+- **AAKeyGen:** xác minh BLS tại các AA cần thiết, cấp đúng tập thỏa. Tổng KeyGen=CAKeyGen+AAKeyGen; báo riêng hai phần.
+- **ABE Encrypt:** `encapsulate`, gồm LSSS và (5)–(8); chọn K trước đồng hồ.
+- **ABE Decrypt:** `recoverCandidate` trên nhánh thỏa đã chọn; gồm tìm khóa theo tên, tính μ và (12)–(14). So sánh K sau đồng hồ.
 
-Thời gian đo gồm:
+Setup nhóm/CA/AA, parse policy, AES, HKDF, JSON và xuất biểu đồ không nằm trong các thời gian ABE. Cột `abe_element_bytes` là tổng byte phần tử ABE, không phải kích thước JSON/toàn hồ sơ.
 
-- Cấp khóa: CAKeyGen và AAKeyGen cho tập thỏa, gồm ký và xác minh Ed25519; không gồm setup CA/AA.
-- Mã hóa: chia sẻ LSSS, tạo ciphertext số mũ, HKDF, mã hóa AES-GCM và tạo AAD; không gồm parse policy hay xuất JSON.
-- Giải mã: tìm nhánh, pairing mô phỏng, khôi phục K, HKDF và xác thực AES-GCM.
+Dùng `System.nanoTime`, lưu từng lượt và metadata máy; báo trung bình và độ lệch chuẩn tổng thể Encrypt/Decrypt. JIT, GC, lịch CPU và cache có thể ảnh hưởng số đo; đây chưa phải JMH. CSV đã đo có thể nạp vào GUI hoặc dựng lại PNG bằng `--plot`; nạp CSV tổng hợp không tự tạo dữ liệu thô.
 
-Có 3 lượt warm-up trước mỗi điểm, các lần đo tạo GID mới. Số liệu dùng `System.nanoTime`, báo trung bình và độ lệch chuẩn tổng thể. Cần đọc SD vì JIT, GC, lập lịch và thứ tự chạy gây dao động; đây không phải harness JMH. Cột pairing phản ánh số lời gọi backend, không phải thời gian pairing elliptic curve.
-
-Ứng dụng không tái lập Figure 3 hay triển khai thuật toán [26] mà bài chính dùng làm đối chứng. Cũng không thay thế JPBC, BLS, chứng minh dual-system, phân quyền vận hành hoặc hệ thống cloud thật. Các phần mở rộng này cần một triển khai và đánh giá riêng.
+**Chưa tái lập chính xác Figure 3** do chưa có chính sách/mã gốc và toàn văn đối chứng Ma–Ge–Zhang [26]. Không tạo số liệu thay thế cho đối chứng; không so sánh trực tiếp thời gian trên máy khác như cùng điều kiện.

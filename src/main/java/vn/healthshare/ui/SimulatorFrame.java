@@ -8,6 +8,8 @@ public final class SimulatorFrame extends JFrame {
         super("SP-MAACS | Mô phỏng chia sẻ hồ sơ y tế");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         setContentPane(new SimulatorPanel());
-        setMinimumSize(new Dimension(1040,740)); setSize(1380,940); setLocationRelativeTo(null);
+        Rectangle available=GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        setMinimumSize(new Dimension(Math.min(1040,available.width),Math.min(700,available.height)));
+        setSize(Math.min(1380,available.width),Math.min(940,available.height));setLocationRelativeTo(null);
     }
 }

@@ -21,7 +21,7 @@ public final class SelfTest {
     }
     private static byte[] bytes(String value){return value.getBytes(StandardCharsets.UTF_8);}
     public static void main(String[] args)throws Exception{
-        CompositeGroup g=new CompositeGroup(128);
+        CompositeGroup g=new CompositeGroup(64);
         var base=g.generator();var a=g.scalar();var b=g.scalar();
         check(g.pairing(base.pow(a),base.pow(b)).equals(g.pairing(base,base).pow(a.multiply(b))),"bilinearity");
         check(g.pairing(base,g.subgroup3()).equals(g.identity(CompositeGroup.Kind.GT)),"Gp1 orthogonal Gp3");
@@ -51,7 +51,7 @@ public final class SelfTest {
             BigInteger reconstructed=matrix.stream().map(row->Policy.dot(row,vector,g.order())).reduce(BigInteger.ZERO,BigInteger::add).mod(g.order());
             check(reconstructed.equals(vector.getFirst()),"LSSS reconstructs s with "+size+" rows");
         }
-        Simulation s=new Simulation(128,x->{});s.loadSample();
+        Simulation s=new Simulation(64,x->{});s.loadSample();
         check(s.authorities().size()==5 && s.users().size()==8 && s.cloud().size()==1,"sample system entities");
         for(String id:new String[]{"doctor-an","researcher-minh","friend-ha"})check(Arrays.equals(s.decrypt("EHR-001",id).plaintext(),bytes(Simulation.DEFAULT_EHR)),"authorized "+id);
         for(String id:new String[]{"doctor-binh","nurse-lan","outsider","colluder-a","colluder-b"})rejects(AccessDenied.class,()->s.decrypt("EHR-001",id),"denied "+id);
@@ -80,7 +80,8 @@ public final class SelfTest {
         String export=ct.publicJson();
         check(!export.contains("\"Cardiology\"")&&!export.contains("\"HeartStudy\"")&&!export.contains("\"AIIMS\"")&&!export.contains("\"Friend\"")&&!export.contains("=Cardiology"),"cloud JSON has no policy values in plaintext");
         check(!export.contains("Nguyễn An")&&!export.contains("BN-2026-001")&&!export.contains("\"CASK\":")&&!export.contains("\"K3\":"),"cloud JSON excludes EHR and private keys");
-        check(export.contains(SpMaacs.BACKEND)&&export.contains("ciphertextAndGcmTag"),"cloud export labels educational backend");
+        check(export.contains(SpMaacs.BACKEND)&&export.contains("ciphertextAndGcmTag"),"cloud export labels real JPBC backend");
+        check(!s.ca().verificationKey().parameters().getParameters().getParameters().containsKey("n0"),"BLS public parameters omit factorization of N");
         var another=s.scheme().encrypt("fresh",bytes("same plaintext"),Policy.parse("OWNER.Relation=Friend"),s.publicKeys(),x->{});
         var another2=s.scheme().encrypt("fresh",bytes("same plaintext"),Policy.parse("OWNER.Relation=Friend"),s.publicKeys(),x->{});
         check(!Arrays.equals(another.iv(),another2.iv())&&!Arrays.equals(another.payload(),another2.payload()),"fresh randomness per encryption");

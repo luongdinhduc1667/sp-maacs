@@ -1,54 +1,77 @@
-# SP-MAACS — Mô phỏng chia sẻ hồ sơ y tế bằng Java
+# SP-MAACS — Java / JPBC Type A1 / BLS
 
-Ứng dụng desktop Java 21, giao diện tiếng Việt, mô phỏng thuật toán trong **“Secured and Privacy-Preserving Multi-Authority Access Control System for Cloud-Based Healthcare Data Sharing”**, Gupta và cộng sự, *Sensors* 2023, 23, 2617. Tài liệu chính là file `3. Privacy preserving for healthcare data sharing.pdf` có sẵn trong thư mục.
+Ứng dụng Java 21, giao diện tiếng Việt, triển khai SP-MAACS trong **“Secured and Privacy-Preserving Multi-Authority Access Control System for Cloud-Based Healthcare Data Sharing”**, Gupta và cộng sự, *Sensors* 2023, 23, 2617. Tài liệu chính là `3. Privacy preserving for healthcare data sharing.pdf` trong thư mục.
 
-Phần mềm tính các thành phần khóa và ciphertext theo Mục 5, công thức (1)–(14), dùng chính sách DNF và ma trận LSSS cho từng nhánh. Các bài còn lại được đối chiếu trong [docs/RELATED_WORK.md](docs/RELATED_WORK.md).
+Phiên bản **2.0.1** dùng **pairing đường cong elliptic thật của JPBC 2.0.0, Type A1, N=p1·p2·p3 với từng số nguyên tố 517 bit**, và **BLS01/SHA-256** cho chứng nhận CA. Phần tử G/GT lưu biểu diễn của JPBC; backend số mũ và Ed25519 của bản trước đã được thay thế. Đây là triển khai phục vụ thực nghiệm, chưa được kiểm toán để bảo vệ hồ sơ y tế thật.
 
-**Phạm vi:** đây là mô phỏng đại số, không phải triển khai ABE an toàn mật mã. Backend biểu diễn phần tử bằng số mũ nên làm lộ discrete logarithm; không dùng để bảo vệ hồ sơ thật. AES-256-GCM, HKDF-SHA256 và chữ ký Ed25519 được thực thi bằng thư viện chuẩn Java. Không cần tải thư viện ngoài để chạy.
+## Build và chạy trên Windows
 
-## Chạy nhanh trên Windows
-
-Máy cần **JDK 21 trở lên**. Trong thư mục dự án:
+Cần **JDK 21+** và Maven. Trong thư mục dự án:
 
 ```powershell
-./run.bat
+pwsh -NoProfile -File .\tools\Run-Maven.ps1 -Goal verify -PaperTests
+java -jar target/sp-maacs-simulator-2.0.1.jar
 ```
 
-File này build nếu chưa có JAR rồi mở giao diện. Hoặc chạy bản đã build:
+Script tìm Maven trong PATH, đăng ký các JAR có trong `lib/` vào kho Maven của dự án rồi chạy JUnit 4.13.2. `-PaperTests` bật kiểm tra bổ sung với ba số nguyên tố 517 bit; bỏ cờ này để chỉ chạy bộ kiểm tra thông thường với tham số nhỏ hơn. Lần đầu Maven có thể cần mạng để tải plugin và thư viện kiểm thử. Kết quả kiểm tra nằm trong `target/surefire-reports/`.
+
+Có thể build trực tiếp bằng JDK với thư viện đã kèm:
 
 ```powershell
-java -jar build/sp-maacs-simulator.jar
+pwsh -NoProfile -File .\build.ps1
+.\run.bat
 ```
 
-Build lại sau khi sửa mã, chạy kiểm thử và tạo ảnh giao diện:
+`run.bat` tạo JAR nếu chưa có. Sau khi sửa source, chạy lại `build.ps1` hoặc Maven để cập nhật JAR tương ứng. Giữ `lib/` cạnh `build/` hoặc `target/` khi chuyển sang máy khác.
+
+Giao diện mở ngay ở cấu hình 517 bit, **chưa khởi tạo phiên mật mã**. Nút **Nạp dữ liệu mẫu** và **Phiên trống** dùng được ngay; chỉ khi chọn chúng chương trình mới tạo phiên trên worker nền. **Xem cấu trúc DNF**, **Nạp CSV đã đo** và chuyển tab không cần chờ setup.
+
+Lần tạo đường cong và các phép pairing 517 bit có thể mất nhiều thời gian. Thanh trạng thái hiển thị tác vụ, số giây đã chạy và nút **Hủy tác vụ**. Khi hủy, chương trình chờ phép tính hiện tại kết thúc trước khi cho bắt đầu tác vụ mật mã khác; phiên khởi tạo đã hủy không được công bố. CSV đã nạp vẫn được giữ. Nội dung các tab có thể cuộn để tới nút thao tác trên cửa sổ nhỏ.
+
+Cache setup riêng của máy tại `build/private/type-a1-3x517.properties` chứa phân tích N; không xuất nó lên cloud hoặc đưa vào gói phân phối.
+
+## Thực nghiệm theo quy mô Figure 3
+
+Đã có bộ kết quả để xem tại [output/paper-figure3-517.csv](output/paper-figure3-517.csv). Trong tab **Hiệu năng**, chọn **Nạp CSV đã đo** để xem biểu đồ mà không chạy lại. Có thể tạo PNG từ CSV bằng:
 
 ```powershell
-pwsh -NoProfile -File ./build.ps1 -Test -RenderUi
+java -jar target/sp-maacs-simulator-2.0.1.jar --plot output/paper-figure3-517.csv
 ```
 
-Nếu chỉ có Windows PowerShell:
+Để đo lại trên máy hiện tại:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ./build.ps1 -Test -RenderUi
+java -jar target/sp-maacs-simulator-2.0.1.jar --benchmark 10 output/paper-figure3-517.csv 517
 ```
 
-Build không dùng Maven, không cần mạng. `pom.xml` cung cấp cấu trúc dự án để nhập vào IntelliJ IDEA / Eclipse; kiểm thử hành vi của dự án được chạy bằng `build.ps1 -Test`, không phụ thuộc JUnit hay Surefire.
+| Tham số | Cấu hình |
+|---|---|
+| Backend | JPBC 2.0.0 Type A1, 3 × 517 bit; BLS01/SHA-256 |
+| Cơ quan / danh mục | 5 AA, mỗi AA có 5 thuộc tính |
+| Thuộc tính trong chính sách | 5, 10, 15, 20, 25 |
+| Thuộc tính cấp khóa và dùng giải mã | 3, 5, 7, 10, 12 tương ứng |
+| Mỗi điểm | 1 lượt warm-up, mặc định 10 lượt đo; GID/khóa mới mỗi lượt |
+| KeyGen | CAKeyGen + AAKeyGen, có báo riêng từng phần; không gồm setup |
+| Encrypt / Decrypt | Chỉ ABE theo (5)–(8) / (12)–(14); loại AES, HKDF, JSON |
+
+Mỗi lượt kiểm tra K khôi phục bằng K gốc sau khi dừng đồng hồ. Ngoài CSV tổng hợp, CLI ghi `*.raw.csv` từng lượt, `*.metadata.json` mô tả môi trường/phạm vi đo và `*.png` gồm ba biểu đồ. Số liệu thô được ghi dần trong khi chạy. CSV có trung bình, độ lệch chuẩn tổng thể Encrypt/Decrypt, số pairing và kích thước các phần tử ABE.
+
+Nút **Xuất CSV + PNG** trong giao diện xuất kết quả đang hiển thị. Khi vừa chạy benchmark, nó xuất thêm raw/metadata; khi chỉ nạp CSV tổng hợp, nó không tự tạo các lượt đo thô chưa có.
+
+Hai dãy trục được lấy từ Figure 3. Chương trình chọn **hai nhánh DNF độc lập, tổng n dòng**, vì chính sách cụ thể và mã nguồn thực nghiệm gốc chưa có trong tài liệu. Đây là thực nghiệm theo cấu hình đã mô tả, **chưa phải tái lập chính xác Figure 3**.
+
+Giữ đối chứng **Ma–Ge–Zhang [26]**, DOI [10.1007/978-3-030-14234-6_23](https://doi.org/10.1007/978-3-030-14234-6_23), theo lựa chọn của người dùng. Chưa có toàn văn đúng bài nên chưa triển khai đường đối chứng. PDF mới `978-3-642-23822-2_16.pdf` là Liu và cộng sự (2011), tài liệu [15], không thay cho [26]. Xem [docs/RELATED_WORK.md](docs/RELATED_WORK.md).
+
+Tham số nhỏ chỉ phục vụ kiểm tra nhanh, không dùng thay kết quả 517 bit:
+
+```powershell
+java -jar target/sp-maacs-simulator-2.0.1.jar --demo output/demo-small 64
+java -jar target/sp-maacs-simulator-2.0.1.jar --help
+```
 
 ## Dùng giao diện
 
-Ứng dụng tự nạp một phiên mẫu gồm **5 cơ quan, 8 người dùng và hồ sơ EHR-001**.
-
-1. **Tổng quan:** nhấn **Chạy 8 tình huống mẫu** để xem kết quả cấp/từ chối truy cập.
-2. **Cơ quan & người dùng:** xem khóa đã cấp; đăng ký GID mới tại CA; tạo AA và danh mục thuộc tính; chọn người dùng và các thuộc tính rồi cấp khóa. Thao tác này đại diện việc AA phê duyệt trong mô phỏng, không phải người đọc tự xác nhận nghề nghiệp.
-3. **Mã hóa hồ sơ:** nhập EHR giả, mã hồ sơ mới và chính sách; xem cấu trúc DNF rồi mã hóa. Mỗi mã hồ sơ duy nhất trong phiên.
-4. **Truy cập & thông đồng:** chọn GID và hồ sơ rồi giải mã. Thử `colluder-a` + `colluder-b` trên EHR-001: từng người không đủ quyền và ghép khóa với cả hai lựa chọn K1 đều thất bại.
-5. **Cloud công khai:** xem/xuất JSON chỉ chứa tên thuộc tính, W, các thành phần ciphertext và EHR mã hóa; không xuất giá trị thuộc tính ở dạng văn bản, khóa người dùng hay EHR gốc.
-6. **Hiệu năng:** đo thời gian cấp khóa, mã hóa và giải mã với 5, 10, 15, 20, 25 thuộc tính; mặc định 10 lượt/điểm; xem biểu đồ và xuất CSV.
-7. **Nhật ký thuật toán:** xem trình tự GlobalSetup, CASetup, AASetup, CAKeyGen, AAKeyGen, Encrypt và Decrypt.
-
-**Phiên trống** tạo môi trường mới để tự khai báo. **Nạp lại dữ liệu mẫu** tạo lại ví dụ ban đầu. Khóa và hồ sơ chỉ ở trong bộ nhớ, bị xóa khi đóng ứng dụng hoặc tạo phiên mới. JSON xuất ra dành cho kiểm tra và báo cáo; phiên bản này không nhập lại JSON hay lưu/khôi phục khóa riêng.
-
-## Chính sách mẫu
+Nhấn **Nạp dữ liệu mẫu** để tạo phiên có 5 cơ quan, 8 người dùng và EHR-001; hoặc **Phiên trống** để tự khai báo. Các nút cần khóa/phiên được bật sau khi khởi tạo thành công. Các màn hình cho phép đăng ký GID tại CA, tạo AA, cấp thuộc tính, mã hóa EHR giả, giải mã theo người dùng, thử ghép khóa và xuất ciphertext công khai. Tab **Hiệu năng** dùng cùng phép đo ABE với CLI; có thể xem CSV đã đo ngay từ lúc mở ứng dụng.
 
 ```text
 (HOSPITAL.Profession=Doctor
@@ -58,72 +81,22 @@ OR (RESEARCH.Role=Researcher AND RESEARCH.Project=HeartStudy)
 OR OWNER.Relation=Friend
 ```
 
-Cloud chỉ hiển thị:
+Cloud giữ tên `AA.Name`, cấu trúc DNF, W và các phần tử ciphertext; không lưu giá trị thuộc tính ở dạng văn bản, khóa người dùng hoặc EHR gốc. Chính sách hỗ trợ AND/OR và ngoặc, phân biệt hoa/thường; giá trị có khoảng trắng đặt trong dấu nháy. Chưa có NOT hoặc ngưỡng k-of-n. Giới hạn: 32 nhánh, 64 dòng/nhánh, 256 dòng tổng; tối đa 4096 tổ hợp khóa ứng viên khi giải mã đa giá trị.
 
-```text
-(HOSPITAL.Profession=* AND MEDICAL.Specialization=* AND HOSPITAL.Affiliation=*)
-OR (RESEARCH.Role=* AND RESEARCH.Project=*)
-OR (OWNER.Relation=*)
-```
+Các vai trò nằm trong một tiến trình; khóa/hồ sơ chỉ tồn tại trong phiên. JSON dành cho kiểm tra, chưa có nhập lại và khôi phục khóa. Chưa triển khai thu hồi, outsourcing, cloud qua mạng, cơ sở dữ liệu hay đăng nhập bệnh viện. HKDF-SHA256, AES-256-GCM và AAD bổ sung cho bước mã hóa đối xứng trong bài, được tách khỏi phép đo ABE.
 
-`HOSPITAL`, `MEDICAL`, `RESEARCH`, `INSURANCE` là các AA thuộc miền mở. `OWNER` là chủ hồ sơ đóng vai AA trong miền đóng. `INSURANCE` có trong danh mục nhưng không được cấp quyền theo chính sách mẫu này.
+## Mã nguồn và tài liệu
 
-Tên AA, tên thuộc tính và giá trị phân biệt hoa/thường. Hỗ trợ `AND`, `OR`, `&&`, `||`, `&`, `|`, dấu ngoặc; AND ưu tiên hơn OR. Giá trị chứa khoảng trắng dùng dấu nháy, ví dụ `OWNER.Relation="Bạn thân"`. Cần khai báo giá trị đó trong danh mục AA trước khi dùng. Không hỗ trợ NOT hay ngưỡng k-of-n.
+| Đường dẫn | Vai trò |
+|---|---|
+| `src/main/java/vn/healthshare/math/CompositeGroup.java` | Type A1, nhóm con và pairing thật |
+| `src/main/java/vn/healthshare/crypto/BlsSignature.java` | BLS01/SHA-256 qua JPBC, Bouncy Castle 1.46 |
+| `src/main/java/vn/healthshare/crypto/SpMaacs.java` | CA/AA, công thức (1)–(14), lớp mã hóa EHR |
+| `src/main/java/vn/healthshare/policy/` | Parser DNF, ma trận AND và tái tạo LSSS |
+| `src/main/java/vn/healthshare/sim/Benchmark.java` | Đo ABE, CSV tổng hợp/thô và metadata |
+| [docs/ALGORITHM.md](docs/ALGORITHM.md) | Ánh xạ thuật toán và phạm vi đo |
+| [docs/RELATED_WORK.md](docs/RELATED_WORK.md) | Các PDF và phân biệt tài liệu [15] với đối chứng [26] |
+| [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) | Nguồn thư viện, checksum, giấy phép |
+| [docs/VALIDATION.md](docs/VALIDATION.md) | Kiểm thử mật mã, vòng đời tác vụ và thao tác chuột trên cửa sổ thật |
 
-Giới hạn biên dịch: 32 nhánh DNF, 64 dòng/nhánh, 256 dòng tổng; 64 mức ngoặc, 16000 ký tự. Các nhánh trùng và nhánh bị hấp thụ được loại bỏ. Người dùng có thể có nhiều giá trị cùng tên; giải mã thử khóa tương ứng theo tên và xác nhận bằng tag GCM, tối đa 4096 tổ hợp.
-
-| Người dùng | Kết quả trên EHR-001 | Lý do |
-|---|---|---|
-| doctor-an | Được phép | Doctor + Cardiology + AIIMS |
-| doctor-binh | Từ chối | Specialization=Neurology |
-| nurse-lan | Từ chối | Profession=Nurse |
-| researcher-minh | Được phép | Researcher + HeartStudy |
-| friend-ha | Được phép | Miền đóng: Relation=Friend |
-| outsider | Từ chối | Chưa được cấp thuộc tính |
-| colluder-a | Từ chối | Thiếu khóa MEDICAL |
-| colluder-b | Từ chối | Thiếu khóa HOSPITAL |
-
-## Chạy bằng dòng lệnh
-
-```powershell
-java -jar build/sp-maacs-simulator.jar --demo
-java -jar build/sp-maacs-simulator.jar --benchmark 10 output/benchmark.csv
-java -jar build/sp-maacs-simulator.jar --help
-```
-
-`--demo [thư_mục_xuất]` kiểm tra 8 trường hợp, thử ghép khóa và xuất ciphertext công khai. Nếu kết quả cấp/từ chối không đúng kỳ vọng, chương trình trả mã lỗi.
-
-`--benchmark [số_lượt] [đường_dẫn.csv]` chạy cùng phép đo như giao diện. Mỗi điểm có 3 lượt warm-up, sau đó các lượt đo với định danh và khóa mới. Setup CA/AA không tính vào thời gian đo. Chính sách gồm hai nhánh độc lập, tổng n dòng; người dùng chỉ có tập thỏa gồm ceil(n/2) thuộc tính. CSV chứa số lượt, trung bình, độ lệch chuẩn tổng thể, số pairing và kích thước JSON UTF-8.
-
-**Thời gian benchmark thuộc backend số mũ, gồm chi phí AES/Ed25519 khi tương ứng; không thể dùng thay số đo JPBC Type A1 hoặc so sánh tốc độ với các bài báo.** Ba thuật toán liên quan không được triển khai thành backend benchmark, vì vậy không có số liệu so sánh giả lập cho chúng.
-
-## Cấu trúc mã nguồn
-
-```text
-src/main/java/vn/healthshare/
-  Main.java                      Giao diện hoặc CLI
-  math/CompositeGroup.java       G, GT, 3 nhóm con, pairing theo số mũ
-  policy/Policy.java             Parser, DNF, LSSS cho AND
-  crypto/SpMaacs.java             Công thức (1)-(14), CA/AA, AES-GCM, HKDF
-  sim/Simulation.java            Vai trò, dữ liệu mẫu, cloud, ghép khóa
-  sim/Benchmark.java             Đo thời gian, thống kê, CSV
-  ui/SimulatorFrame.java         Cửa sổ desktop
-  ui/SimulatorPanel.java         Các màn hình tương tác, biểu đồ
-src/test/java/vn/healthshare/
-  SelfTest.java                  Kiểm thử hành vi và đại số
-  UiSmokeTest.java               Thử luồng GUI và render ảnh
-docs/ALGORITHM.md                Ánh xạ công thức sang mã và sai khác có chủ đích
-docs/RELATED_WORK.md             Đối chiếu 4 tài liệu trong thư mục
-```
-
-Kiểm thử bao gồm tính song tuyến tính, trực giao nhóm con, tái tạo LSSS, phép đổi DNF, cấp/từ chối truy cập, giá trị sai, đa giá trị, giả chứng nhận, sửa EHR/header, ghép khóa cùng/khác AA và benchmark round trip. Kiểm thử GUI kiểm tra xóa plaintext cũ khi chuyển người dùng để tránh hiển thị lại kết quả của người được phép.
-
-## Khác biệt với thực nghiệm trong bài
-
-- Bài báo sử dụng JPBC Type A1, ba số nguyên tố 517 bit và BLS. Ứng dụng này dùng mô hình số mũ, mặc định ba số nguyên tố 128 bit và Ed25519 để có thể chạy hoàn toàn bằng JDK. Số bit này là kích thước mô phỏng, không phải mức an toàn mật mã.
-- Ma trận LSSS được dựng riêng cho từng phép AND trong DNF, không phải bộ giải LSSS tổng quát. Mọi hệ số tái tạo bằng 1 với cấu trúc ma trận đã chọn.
-- Bổ sung HKDF, AES-GCM và AAD để kiểm tra kết quả khôi phục khóa và phát hiện chỉnh sửa. Bài mô tả bước mã hóa đối xứng nhưng không ấn định các lựa chọn này.
-- Không triển khai thu hồi thuộc tính, outsourcing giải mã, cloud qua mạng, cơ sở dữ liệu, đăng nhập người dùng hay hệ thống bệnh án thật. Các vai trò nằm trong một tiến trình mô phỏng.
-- Kiểm thử thông đồng chỉ xác minh các tình huống trên mô hình; không chuyển chứng minh an toàn thích nghi của bài báo sang backend số mũ.
-
-Xem [docs/ALGORITHM.md](docs/ALGORITHM.md) để theo dõi từng công thức và [docs/RELATED_WORK.md](docs/RELATED_WORK.md) để phân biệt các thuật toán liên quan.
+Pairing thật loại bỏ hạn chế làm lộ số mũ của bản cũ, nhưng không thay thế chứng minh an toàn cho toàn bộ phần mềm. JPBC/Bouncy Castle cũ được giữ để thực nghiệm tương thích; cấu hình nghiên cứu này không phải khuyến nghị triển khai sản xuất.

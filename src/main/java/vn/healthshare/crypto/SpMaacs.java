@@ -3,6 +3,7 @@ package vn.healthshare.crypto;
 import vn.healthshare.math.CompositeGroup;
 import vn.healthshare.math.CompositeGroup.Element;
 import vn.healthshare.policy.Policy;
+import vn.healthshare.policy.Lsss;
 import vn.healthshare.policy.Policy.Attribute;
 import vn.healthshare.policy.Policy.Label;
 
@@ -18,33 +19,28 @@ import java.security.*;
 import java.util.*;
 import java.util.function.Consumer;
 
-/** Section 5, equations (1)-(14), evaluated over the educational composite-group backend. */
+/** Section 5, equations (1)-(14), evaluated using real JPBC Type A1 pairing. */
 public final class SpMaacs {
-    public static final String BACKEND = "EDUCATIONAL_EXPONENT_MODEL_NOT_SECURE_ABE";
+    public static final String BACKEND = "JPBC_2.0.0_TYPE_A1_BLS01";
     private static final SecureRandom RANDOM = new SecureRandom();
     private final CompositeGroup group;
     public SpMaacs(CompositeGroup group) { this.group=Objects.requireNonNull(group); }
     public CompositeGroup group() { return group; }
     public static final class CentralAuthority {
         private final CompositeGroup group;
-        private final KeyPair signatureKey;
+        private final BlsSignature signatureKey;
         private final Set<String> registered = new HashSet<>();
         public CentralAuthority(CompositeGroup group) {
             this.group=group;
-            try { signatureKey=KeyPairGenerator.getInstance("Ed25519").generateKeyPair(); }
-            catch(GeneralSecurityException e) { throw new IllegalStateException(e); }
+            signatureKey=new BlsSignature(group);
         }
-        public PublicKey verificationKey() { return signatureKey.getPublic(); }
+        public BlsSignature.VerificationKey verificationKey() { return signatureKey.verificationKey(); }
         /** CAKeyGen: one fresh r_gid and Gp3 blind per gid; signature authenticates gid || K1. */
         public Identity register(String gid) {
             if(gid==null || !gid.matches("[\\p{L}\\p{N}_@.-]{1,80}")) throw new IllegalArgumentException("GID chỉ gồm chữ, số, _, @, dấu chấm, dấu gạch; tối đa 80 ký tự.");
             if(registered.contains(gid)) throw new IllegalArgumentException("GID đã được đăng ký: "+gid);
             Element k1=group.generator().pow(group.scalar()).multiply(group.subgroup3());
-            try {
-                Signature signer=Signature.getInstance("Ed25519"); signer.initSign(signatureKey.getPrivate());
-                signer.update(identityMessage(gid,k1));
-                Identity result=new Identity(gid,k1,signer.sign()); registered.add(gid); return result;
-            } catch(GeneralSecurityException e) { throw new IllegalStateException(e); }
+            Identity result=new Identity(gid,k1,signatureKey.sign(identityMessage(gid,k1))); registered.add(gid); return result;
         }
     }
     public record Identity(String gid, Element k1, byte[] signature) {
@@ -58,11 +54,11 @@ public final class SpMaacs {
         private final CompositeGroup group;
         private final String id;
         private final BigInteger alpha, beta;
-        private final PublicKey trustedCaKey;
+        private final BlsSignature.VerificationKey trustedCaKey;
         private final Map<Attribute,BigInteger> exponents;
         private final PublicAuthority publicKey;
         /** AASetup, equations (1)-(4). The catalog is registered by this authority, not by the requester. */
-        public AttributeAuthority(CompositeGroup group, String id, Collection<Attribute> catalog, PublicKey trustedCaKey) {
+        public AttributeAuthority(CompositeGroup group, String id, Collection<Attribute> catalog, BlsSignature.VerificationKey trustedCaKey) {
             this.group=group; this.id=id; this.trustedCaKey=Objects.requireNonNull(trustedCaKey); new Label(id,"Check");
             alpha=group.scalar(); beta=group.scalar(); exponents=new LinkedHashMap<>();
             Map<Attribute,Element> bases=new LinkedHashMap<>();
@@ -106,12 +102,7 @@ public final class SpMaacs {
         }
         public List<Attribute> attributes() { return authorities.values().stream().flatMap(a->a.k3().keySet().stream()).toList(); }
     }
-    public static boolean verifyIdentity(Identity identity, PublicKey publicKey) {
-        try {
-            Signature verifier=Signature.getInstance("Ed25519"); verifier.initVerify(publicKey);
-            verifier.update(identityMessage(identity.gid(),identity.k1())); return verifier.verify(identity.signature());
-        } catch(GeneralSecurityException | IllegalArgumentException e) { return false; }
-    }
+    public static boolean verifyIdentity(Identity identity, BlsSignature.VerificationKey publicKey) {return BlsSignature.verify(identityMessage(identity.gid(),identity.k1()),identity.signature(),publicKey);}
     private static byte[] identityMessage(String gid, Element k1) {
         return binary(out->{out.writeUTF("SP-MAACS/CA/v1"); writeString(out,gid); writeBytes(out,k1.bytes());});
     }
@@ -159,7 +150,7 @@ public final class SpMaacs {
         }
         public String publicJson() {
             StringBuilder s=new StringBuilder("{\n  \"format\": \"SP-MAACS-SIM-v1\",\n  \"backend\": ").append(json(BACKEND))
-                    .append(",\n  \"warning\": \"Exponent simulation; not cryptographically secure ABE. Session-only export for inspection.\",")
+                    .append(",\n  \"scope\": \"JPBC Type A1 research implementation. Session-only export for inspection.\",")
                     .append("\n  \"id\": ").append(json(id)).append(",\n  \"orderN\": ").append(json(order.toString()))
                     .append(",\n  \"publicPolicy\": ").append(json(hiddenPolicy())).append(",\n  \"clauses\": [");
             for(int i=0;i<clauses.size();i++) {
@@ -182,6 +173,20 @@ public final class SpMaacs {
         if(id==null || id.isBlank() || id.length()>200) throw new IllegalArgumentException("Mã hồ sơ phải từ 1 đến 200 ký tự.");
         if(ehr==null || ehr.length==0 || ehr.length>2_000_000) throw new IllegalArgumentException("Hồ sơ phải có dữ liệu, tối đa 2 MB.");
         Element k=group.targetGenerator().pow(group.p1Scalar());
+        List<Clause> clauses=encapsulate(k,policy,publicKeys,trace);
+        byte[] salt=randomBytes(32), iv=randomBytes(12);
+        Ciphertext shell=new Ciphertext(id,group.order(),clauses,salt,iv,new byte[0]);
+        try {
+            byte[] aesKey=hkdf(k.bytes(),salt);
+            try {
+                byte[] payload=aes(Cipher.ENCRYPT_MODE,aesKey,iv,shell.authenticatedHeader(),ehr);
+                trace.accept("AES-256-GCM: mã hóa EHR; xác thực toàn bộ header công khai bằng AAD. Cloud không lưu giá trị thuộc tính.");
+                return new Ciphertext(id,group.order(),clauses,salt,iv,payload);
+            } finally { Arrays.fill(aesKey,(byte)0); }
+        } catch(GeneralSecurityException e) { throw new IllegalStateException("Không thể mã hóa AES-GCM.",e); }
+    }
+    /** Pure ABE Encrypt(K), equations (5)-(8); used directly by the paper benchmark. */
+    public List<Clause> encapsulate(Element k, Policy policy, Map<String,PublicAuthority> publicKeys, Consumer<String> trace) {
         List<Clause> clauses=new ArrayList<>();
         trace.accept("Encrypt: DNF có "+policy.clauses().size()+" nhánh; mỗi nhánh dùng s, v và r_x mới.");
         for(List<Attribute> attributes:policy.clauses()) {
@@ -206,16 +211,27 @@ public final class SpMaacs {
             clauses.add(new Clause(saa,k.multiply(alpha.pow(secret)),group.generator().pow(secret),rows));
             trace.accept("Nhánh "+clauses.size()+": W="+attributes.size()+"×"+attributes.size()+", SAA="+saa+"; tính C, C0, C1,x, C2,x theo (5)-(8).");
         }
-        byte[] salt=randomBytes(32), iv=randomBytes(12);
-        Ciphertext shell=new Ciphertext(id,group.order(),clauses,salt,iv,new byte[0]);
-        try {
-            byte[] aesKey=hkdf(k.bytes(),salt);
-            try {
-                byte[] payload=aes(Cipher.ENCRYPT_MODE,aesKey,iv,shell.authenticatedHeader(),ehr);
-                trace.accept("AES-256-GCM: mã hóa EHR; xác thực toàn bộ header công khai bằng AAD. Cloud không lưu giá trị thuộc tính.");
-                return new Ciphertext(id,group.order(),clauses,salt,iv,payload);
-            } finally { Arrays.fill(aesKey,(byte)0); }
-        } catch(GeneralSecurityException e) { throw new IllegalStateException("Không thể mã hóa AES-GCM.",e); }
+        return List.copyOf(clauses);
+    }
+    /** Pure ABE reconstruction (12)-(14) for an unambiguous candidate clause; performs no value comparison. */
+    public Element recoverCandidate(Clause clause,UserKeys keys) throws AccessDenied {
+        Element ck=group.identity(CompositeGroup.Kind.G),product=group.identity(CompositeGroup.Kind.GT);
+        for(String aa:clause.authorities()){
+            AuthorityKeys ak=keys.authorities().get(aa);if(ak==null)throw new AccessDenied("Thiếu khóa AA: "+aa);ck=ck.multiply(ak.k2());
+        }
+        // Resolve names before pairings, as section 5.4's satisfying-clause selection prescribes.
+        List<Element> matching=new ArrayList<>();
+        for(Row row:clause.rows()){
+            AuthorityKeys ak=keys.authorities().get(row.label().authority());
+            List<Element> options=ak.k3().entrySet().stream().filter(e->e.getKey().label().equals(row.label())).map(Map.Entry::getValue).toList();
+            if(options.size()!=1)throw new AccessDenied("Nhánh benchmark cần đúng một khóa ứng viên cho mỗi tên.");matching.add(options.getFirst());
+        }
+        List<BigInteger> mu=Lsss.reconstruct(clause.rows().stream().map(Row::matrixRow).toList(),group.order());
+        Element numerator=group.pairing(ck,clause.c0());
+        for(int i=0;i<clause.rows().size();i++){
+            Row row=clause.rows().get(i);product=product.multiply(group.pairing(row.c1(),keys.identity().k1()).multiply(group.pairing(row.c2(),matching.get(i))).pow(mu.get(i)));
+        }
+        return clause.c().divide(numerator.divide(product));
     }
     public record Decryption(byte[] plaintext, int clauseIndex, int attempts, CompositeGroup.Counts operations) {
         public Decryption { plaintext=plaintext.clone(); }
@@ -252,7 +268,8 @@ public final class SpMaacs {
             if(missing) { trace.accept("Bỏ nhánh "+(index+1)+": thiếu tên thuộc tính."); continue; }
             Element numerator=group.pairing(ck,c.c0()); // (12)
             trace.accept("Nhánh "+(index+1)+": tính e(CK,C0); thử khóa có cùng tên, không đọc giá trị bị ẩn.");
-            byte[] plaintext=tryCombinations(ciphertext,c,numerator,factors,0,group.identity(CompositeGroup.Kind.GT),attempts);
+            List<BigInteger> mu=Lsss.reconstruct(c.rows().stream().map(Row::matrixRow).toList(),group.order());
+            byte[] plaintext=tryCombinations(ciphertext,c,numerator,factors,mu,0,group.identity(CompositeGroup.Kind.GT),attempts);
             if(plaintext!=null) {
                 trace.accept("(13) khử phần r_gid; (14) thu hồi K; tag AES-GCM hợp lệ. Truy cập được cấp.");
                 return new Decryption(plaintext,index+1,attempts[0],group.counts().minus(start));
@@ -260,12 +277,12 @@ public final class SpMaacs {
         }
         throw new AccessDenied("Từ chối: thiếu khóa, sai giá trị, khóa không cùng định danh hoặc ciphertext đã bị sửa. Đã thử "+attempts[0]+" tổ hợp.");
     }
-    private byte[] tryCombinations(Ciphertext ct, Clause clause, Element numerator, List<List<Element>> factors,
+    private byte[] tryCombinations(Ciphertext ct, Clause clause, Element numerator, List<List<Element>> factors,List<BigInteger> mu,
                                    int row, Element product, int[] attempts) throws AccessDenied {
         if(row==factors.size()) {
             if(attempts[0]>=4096) throw new AccessDenied("Vượt 4096 tổ hợp khóa thử. Hãy giảm số giá trị/thuộc tính hoặc chia nhỏ chính sách.");
             attempts[0]++;
-            Element recovered=clause.c().divide(numerator.divide(product)); // (13), mu_x=1; then (14)
+            Element recovered=clause.c().divide(numerator.divide(product)); // Product already includes LSSS reconstruction powers (13); then (14).
             byte[] key=null;
             try {
                 key=hkdf(recovered.bytes(),ct.salt);
@@ -275,7 +292,7 @@ public final class SpMaacs {
             finally { if(key!=null) Arrays.fill(key,(byte)0); }
         }
         for(Element option:factors.get(row)) {
-            byte[] result=tryCombinations(ct,clause,numerator,factors,row+1,product.multiply(option),attempts);
+            byte[] result=tryCombinations(ct,clause,numerator,factors,mu,row+1,product.multiply(option.pow(mu.get(row))),attempts);
             if(result!=null) return result;
         }
         return null;

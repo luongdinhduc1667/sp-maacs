@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/emilianobonassi/jpbc",
+  "commit": "6c0a389ba5712534798765bc679a5d4b40df517c",
+  "downloadedUtc": "2026-10-18T12:35:13.5059738Z",
+  "files": [
+    "jpbc-api-2.0.0.jar",
+    "jpbc-plaf-2.0.0.jar",
+    "jpbc-crypto-2.0.0.jar",
+    "jpbc-pbc-2.0.0.jar",
+    "bcprov-jdk16-1.46.jar",
+    "jna-3.2.5.jar"
+  ]
+}

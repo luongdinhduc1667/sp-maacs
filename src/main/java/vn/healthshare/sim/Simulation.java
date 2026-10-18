@@ -22,8 +22,8 @@ public final class Simulation {
     private final Map<String,Ciphertext> cloud=new LinkedHashMap<>();
     private final Consumer<String> log;
     public Simulation(int bits, Consumer<String> log) {
-        this.log=log; group=new CompositeGroup(bits); ca=new CentralAuthority(group); scheme=new SpMaacs(group);
-        log.accept("GlobalSetup: mô phỏng 3 nhóm con, "+bits+" bit/số nguyên tố. CASetup: chữ ký Ed25519.");
+        this.log=log;log.accept("GlobalSetup: đang tạo/đọc đường cong Type A1, 3 × "+bits+" bit…");group=new CompositeGroup(bits);log.accept("CASetup: đang tạo khóa chữ ký BLS01…");ca=new CentralAuthority(group);scheme=new SpMaacs(group);
+        log.accept("GlobalSetup: JPBC Type A1, 3 nhóm con, "+bits+" bit/số nguyên tố. CASetup: chữ ký BLS01/SHA-256.");
     }
     public SpMaacs scheme() { return scheme; }
     public CentralAuthority ca() { return ca; }
@@ -112,7 +112,7 @@ public final class Simulation {
         if(firstWorks || secondWorks) result.append("Ít nhất một người đã được phép truy cập riêng; trường hợp này không kiểm chứng thông đồng.");
         else if(!pooled) result.append("Ghép theo cả hai K1 đều bị từ chối: các phần r_gid khác nhau không khử được trong (12)-(14); tag GCM không hợp lệ.");
         else result.append("Ghép khóa giải mã thành công trong mô hình. Cần kiểm tra lại tình huống.");
-        result.append("\nĐây là thử nghiệm trên mô hình đại số, không phải chứng minh an toàn mật mã.");
+        result.append("\nĐây là kiểm thử thực thi JPBC, không phải chứng minh an toàn mật mã.");
         log.accept(result.toString()); return result.toString();
     }
     private boolean canDecrypt(Ciphertext ct, UserKeys keys) {

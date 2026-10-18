@@ -20,7 +20,7 @@ public final class UiSmokeTest {
         AtomicReference<SimulatorPanel> view=new AtomicReference<>();
         SwingUtilities.invokeAndWait(()->{
             try{
-                SimulatorPanel panel=new SimulatorPanel();view.set(panel);panel.setSize(1380,940);layout(panel);
+                SimulatorPanel panel=new SimulatorPanel(64,true);view.set(panel);panel.setSize(1380,940);layout(panel);
                 JTabbedPane tabs=descendants(panel,JTabbedPane.class).getFirst();
                 button(panel,"Chạy 8 tình huống mẫu").doClick();
                 JTable demo=descendants(tabs.getComponentAt(0),JTable.class).getFirst();
@@ -55,6 +55,28 @@ public final class UiSmokeTest {
                 render(panel,output.resolve("07-benchmark.png"));
                 System.out.println("PASS UI benchmark background worker, table and chart; 7 screenshots rendered.");
             }catch(Exception e){throw new RuntimeException(e);}
+        });
+        CountDownLatch setupFinished=new CountDownLatch(1);
+        AtomicReference<SimulatorPanel> asyncView=new AtomicReference<>();
+        SwingUtilities.invokeAndWait(()->{
+            SimulatorPanel panel=new SimulatorPanel(64,false);asyncView.set(panel);
+            JButton register=button(panel,"Đăng ký");
+            if(register.isEnabled())throw new AssertionError("Controls must be disabled while actual JPBC setup runs in background");
+            register.addPropertyChangeListener("enabled",e->{if(Boolean.TRUE.equals(e.getNewValue()))setupFinished.countDown();});
+        });
+        if(!setupFinished.await(60,TimeUnit.SECONDS))throw new AssertionError("Asynchronous JPBC setup timed out");
+        CountDownLatch registrationFinished=new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(()->{
+            SimulatorPanel panel=asyncView.get();JButton register=button(panel,"Đăng ký");
+            descendants(panel,JTextField.class).getFirst().setText("async-user");
+            register.addPropertyChangeListener("enabled",e->{if(Boolean.TRUE.equals(e.getNewValue()))registrationFinished.countDown();});register.doClick();
+            if(register.isEnabled())throw new AssertionError("BLS registration should run in background");
+        });
+        if(!registrationFinished.await(60,TimeUnit.SECONDS))throw new AssertionError("Asynchronous BLS registration timed out");
+        SwingUtilities.invokeAndWait(()->{
+            var tabs=descendants(asyncView.get(),JTabbedPane.class).getFirst();
+            if(descendants(tabs.getComponentAt(1),JTable.class).getFirst().getRowCount()!=9)throw new AssertionError("Async registration must publish the new user");
+            System.out.println("PASS asynchronous JPBC initialization and BLS registration; EDT remains responsive.");
         });
     }
     private static JButton button(Component root,String text){return descendants(root,JButton.class).stream().filter(b->b.getText().equals(text)).findFirst().orElseThrow();}
