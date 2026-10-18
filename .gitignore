@@ -6,3 +6,4 @@ output/
 *.log
 .idea/
 .vscode/
+pdf-docs
