@@ -1,0 +1,7 @@
+build/
+tmp/
+output/
+*.class
+*.log
+.idea/
+.vscode/
